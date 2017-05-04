@@ -925,6 +925,7 @@ static struct dentry *simplefs_mount(struct file_system_type *fs_type,
 	return ret;
 }
 
+// unmount시 호출되는 함수. super블록을 해제한다.
 static void simplefs_kill_superblock(struct super_block *sb)
 {
 	printk(KERN_INFO
@@ -936,7 +937,10 @@ static void simplefs_kill_superblock(struct super_block *sb)
 	return;
 }
 
+// 파일시스템 등록과정에서 사용되는 자료구조.
 struct file_system_type simplefs_fs_type = {
+	// 리눅스 커널은 모듈을 관리하기 위해 "struct module" 구조체를 사용한다.
+	// THIS_MODULE 매크로는 모듈이 올라갈 때 시작주소를 가르키게 된다.
 	.owner = THIS_MODULE,
 	.name = "simplefs",
 	.mount = simplefs_mount,

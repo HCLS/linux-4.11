@@ -1164,6 +1164,8 @@ enum d_walk_ret {
  *
  * The @enter() and @finish() callbacks are called with d_lock held.
  */
+
+// shrink decache 작업을 예로 주석 작업을 함.
 static void d_walk(struct dentry *parent, void *data,
 		   enum d_walk_ret (*enter)(void *, struct dentry *),
 		   void (*finish)(void *))
@@ -1175,17 +1177,23 @@ static void d_walk(struct dentry *parent, void *data,
 	bool retry = true;
 
 again:
+	// 최신화된 name을 읽어오기 위해 rename 시퀀스 락을 사용한다.
 	read_seqbegin_or_lock(&rename_lock, &seq);
+	// 마운트 포인트 덴트리.
 	this_parent = parent;
 	spin_lock(&this_parent->d_lock);
 
+	// enter 함수는 select_collect() 함수,
+	// data는 select_data 구조체.
 	ret = enter(data, this_parent);
 	switch (ret) {
 	case D_WALK_CONTINUE:
 		break;
+	// D_WALK_QUIT == need_resched()
 	case D_WALK_QUIT:
 	case D_WALK_SKIP:
 		goto out_unlock;
+	// D_WALK_NORETRY != need_resched()
 	case D_WALK_NORETRY:
 		retry = false;
 		break;
@@ -1363,26 +1371,43 @@ out:
  * constraints.
  */
 
+// 특정 덴트리의 자식 덴트리 리스트를 검색하며 사용되지 않는
+// 자식 덴트리를 dispose 리스트의 뒤에 옮긴다. 서브 디렉토리가
+// 비어있을 때까지 검색을 계속한다.
+//
+// dispose 리스트에 추가된 덴트리 수를 리턴.
+// 이 작업은 락을 중간에 놓을 수 있기 때문에 결과값이 모든 
+// 사용되지 않는 자식 덴트리 수를 나타내지 않는다.
 struct select_data {
 	struct dentry *start;
 	struct list_head dispose;
 	int found;
 };
 
+// shrink dcache parent 작업을 기준으로 주석 작업.
+// @ _data : select_data 구조체
+// @ dentry : 마운트 포인트 덴트리
 static enum d_walk_ret select_collect(void *_data, struct dentry *dentry)
 {
 	struct select_data *data = _data;
 	enum d_walk_ret ret = D_WALK_CONTINUE;
 
+	// select_dat->start가 마운트 포인트면 D_WALK_CONTINUE 리턴.
 	if (data->start == dentry)
 		goto out;
 
+	// dentry가 struct select_data.dispose 리스트에 있으면
+	// DCACHE_SHRINK_LIST 플래그가 세팅되어 있다. found 값 증가.
 	if (dentry->d_flags & DCACHE_SHRINK_LIST) {
 		data->found++;
 	} else {
+		// LRU 리스트는 미사용, 또는 부정 상태인 덴트리 객체의
+		// 이중 연결 리스트.
 		if (dentry->d_flags & DCACHE_LRU_LIST)
+			// LRU 리스트에서 제거.
 			d_lru_del(dentry);
 		if (!dentry->d_lockref.count) {
+			// 락이 걸려있지 않는 덴트리를 shrink list에 추가. 
 			d_shrink_add(dentry, &data->dispose);
 			data->found++;
 		}
@@ -1393,6 +1418,8 @@ static enum d_walk_ret select_collect(void *_data, struct dentry *dentry)
 	 * the rest.
 	 */
 	if (!list_empty(&data->dispose))
+		// need_resched() 함수는 need_resched 플래그 값을 확인한다.
+		// 플래그가 설정된 경우 true, 아니면 false 반환.
 		ret = need_resched() ? D_WALK_QUIT : D_WALK_NORETRY;
 out:
 	return ret;
@@ -1404,11 +1431,18 @@ out:
  *
  * Prune the dcache to remove unused children of the parent dentry.
  */
+// parent 덴트리의 자식 덴트리 중, 사용되지 않는 덴트리를 해제한다.
+// 미사용 상태인 덴트리는 유효한 아이노드(d_inode 항목이 아이노드를
+// 가르킴)를 가지고 있지만, 현재 VFS가 해당 덴트리 객체를 사용하고
+// 있지 않은(d_count 값이 0) 상태다. 덴트리 객체가 유효한 객체를
+// 가르키고 있기 때문에, 다시 필요할 때를 대비해 캐시 등에 보관된다.
+// 메모리 확보가 필요한 경우에는 사용하지 않는 덴트리를 폐기할 수 있다.
 void shrink_dcache_parent(struct dentry *parent)
 {
 	for (;;) {
 		struct select_data data;
 
+		// select_data 초기화.
 		INIT_LIST_HEAD(&data.dispose);
 		data.start = parent;
 		data.found = 0;

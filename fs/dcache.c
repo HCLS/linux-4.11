@@ -584,18 +584,24 @@ failed:
 	return dentry; /* try again with same dentry */
 }
 
+// dentry의 parent dentry의 d_lock을 얻고 parent를 리턴해준다.
 static inline struct dentry *lock_parent(struct dentry *dentry)
 {
 	struct dentry *parent = dentry->d_parent;
+	// dentry가 루트면 부모가 없으므로.
 	if (IS_ROOT(dentry))
 		return NULL;
+	// 예외처리
 	if (unlikely(dentry->d_lockref.count < 0))
 		return NULL;
+	// 부모 디렉토리 lock 획득.
 	if (likely(spin_trylock(&parent->d_lock)))
 		return parent;
 	rcu_read_lock();
 	spin_unlock(&dentry->d_lock);
 again:
+	// 변수에 volatile 속성을 부여함.
+	// 레지스터에서 읽지 않고 메모리에서 읽어옴.
 	parent = ACCESS_ONCE(dentry->d_parent);
 	spin_lock(&parent->d_lock);
 	/*
@@ -606,13 +612,15 @@ again:
 	 * spin_lock() above is enough of a barrier
 	 * for checking if it's still our child.
 	 */
+	// ACCESS_ONCE로 parent를 읽어온 후, spin_lock을 기다리는
+	// 동안 dentry->d_parent가 변경될 수 있다.
 	if (unlikely(parent != dentry->d_parent)) {
 		spin_unlock(&parent->d_lock);
 		goto again;
 	}
 	rcu_read_unlock();
 	if (parent != dentry)
-		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED)
 	else
 		parent = NULL;
 	return parent;
@@ -637,6 +645,7 @@ static inline bool fast_dput(struct dentry *dentry)
 	 */
 	if (unlikely(dentry->d_flags & DCACHE_OP_DELETE))
 		return lockref_put_or_lock(&dentry->d_lockref);
+		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
 
 	/*
 	 * .. otherwise, we can try to just decrement the
@@ -942,6 +951,8 @@ static void shrink_dentry_list(struct list_head *list)
 
 	while (!list_empty(list)) {
 		struct inode *inode;
+		// list_head를 가지고 있는 부모 구조체 리턴
+		// list->prev로 탐색하는 이유는, 자식 덴트리부터 해제하기 위함
 		dentry = list_entry(list->prev, struct dentry, d_lru);
 		spin_lock(&dentry->d_lock);
 		parent = lock_parent(dentry);
@@ -1267,6 +1278,7 @@ ascend:
 		finish(data);
 
 out_unlock:
+	// Lock 해제.
 	spin_unlock(&this_parent->d_lock);
 	done_seqretry(&rename_lock, seq);
 	return;
@@ -1407,7 +1419,7 @@ static enum d_walk_ret select_collect(void *_data, struct dentry *dentry)
 			// LRU 리스트에서 제거.
 			d_lru_del(dentry);
 		if (!dentry->d_lockref.count) {
-			// 락이 걸려있지 않는 덴트리를 shrink list에 추가. 
+			// 참조되지 않는 덴트리를 shrink list에 추가. 
 			d_shrink_add(dentry, &data->dispose);
 			data->found++;
 		}
@@ -1434,7 +1446,7 @@ out:
 // parent 덴트리의 자식 덴트리 중, 사용되지 않는 덴트리를 해제한다.
 // 미사용 상태인 덴트리는 유효한 아이노드(d_inode 항목이 아이노드를
 // 가르킴)를 가지고 있지만, 현재 VFS가 해당 덴트리 객체를 사용하고
-// 있지 않은(d_count 값이 0) 상태다. 덴트리 객체가 유효한 객체를
+// 있지 않은(d_lockref.count 값이 0) 상태다. 덴트리 객체가 유효한 객체를
 // 가르키고 있기 때문에, 다시 필요할 때를 대비해 캐시 등에 보관된다.
 // 메모리 확보가 필요한 경우에는 사용하지 않는 덴트리를 폐기할 수 있다.
 void shrink_dcache_parent(struct dentry *parent)

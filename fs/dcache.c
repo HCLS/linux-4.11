@@ -377,8 +377,10 @@ static void d_lru_del(struct dentry *dentry)
 static void d_shrink_del(struct dentry *dentry)
 {
 	D_FLAG_VERIFY(dentry, DCACHE_SHRINK_LIST | DCACHE_LRU_LIST);
+	// 리스트 삭제하고 prev, next 자신한테 연결.
 	list_del_init(&dentry->d_lru);
 	dentry->d_flags &= ~(DCACHE_SHRINK_LIST | DCACHE_LRU_LIST);
+	// nr_dentry_unused는 미사용 중인 덴트리 개수를 의미한다.
 	this_cpu_dec(nr_dentry_unused);
 }
 
@@ -955,6 +957,7 @@ static void shrink_dentry_list(struct list_head *list)
 		// list->prev로 탐색하는 이유는, 자식 덴트리부터 해제하기 위함
 		dentry = list_entry(list->prev, struct dentry, d_lru);
 		spin_lock(&dentry->d_lock);
+		// 부모 덴트리가 spin-lock을 얻음 
 		parent = lock_parent(dentry);
 
 		/*
@@ -962,12 +965,19 @@ static void shrink_dentry_list(struct list_head *list)
 		 * to the LRU here, so we can simply remove it from the list
 		 * here regardless of whether it is referenced or not.
 		 */
+		// Shrink list에서만 제거한다. 덴트리 인스턴스 자체는 메모리에서
+		// free 되지 않은 상태. 어차피 바로 아래 코드에서 reference 
+		// count를 검사하여 덴트리 객체를 free 시킬지 안할지 정하기
+		// 때문에, shrink 리스트에서 제거해도 상관 없다.
 		d_shrink_del(dentry);
 
 		/*
 		 * We found an inuse dentry which was not removed from
 		 * the LRU because of laziness during lookup. Do not free it.
 		 */
+		// 다른 CPU가 shrink 리스트에서 삭제한 덴트리의 스핀락을
+		// 대기하고 있으면 커널 메모리에서 해제하지 않고 스핀락을
+		// 놓아줌으로써 덴트리를 사용 가능하게 한다.
 		if (dentry->d_lockref.count > 0) {
 			spin_unlock(&dentry->d_lock);
 			if (parent)
@@ -975,13 +985,14 @@ static void shrink_dentry_list(struct list_head *list)
 			continue;
 		}
 
-
+		// 이미 덴트리 캐시에서 해제된 경우 예외처리.
 		if (unlikely(dentry->d_flags & DCACHE_DENTRY_KILLED)) {
 			bool can_free = dentry->d_flags & DCACHE_MAY_FREE;
 			spin_unlock(&dentry->d_lock);
 			if (parent)
 				spin_unlock(&parent->d_lock);
 			if (can_free)
+				// TODO: 여기부터 분석.
 				dentry_free(dentry);
 			continue;
 		}

@@ -302,17 +302,36 @@ static inline void __d_clear_type_and_inode(struct dentry *dentry)
 static void dentry_free(struct dentry *dentry)
 {
 	WARN_ON(!hlist_unhashed(&dentry->d_u.d_alias));
+	// 덴트리에는 internal name, external name이 있다.
+	// internal name의 제한은 192바이트(64-bit 기준) 이다.
+	// 이 길이를 넘는경우 external name에 저장한다.
+	// external name은 따로 메모리를 할당받는다.
+	// d_iname(internal)과 d_name.name(external)을 비교하여
+	// 같으면 false, 다르면 true 리턴.
 	if (unlikely(dname_external(dentry))) {
 		struct external_name *p = external_name(dentry);
+		// external name을 생성할 때 u.count를 1로 설정한다.
+		// u.count가 1인경우 조건문 진입.
 		if (likely(atomic_dec_and_test(&p->u.count))) {
+			// 현재 덴트리 구조체를 참조하고 있는 모든 프로세서가
+			// read-side critical section을 벗어났을 때 호출될
+			// 콜백 함수(__d_free_external)을 덴트리의 d_rcu에
+			// 등록해놓는다. 
+			// __d_free_external함수는 external name 을 해제하고
+			// 덴트리를 해제한다.
 			call_rcu(&dentry->d_u.d_rcu, __d_free_external);
 			return;
 		}
 	}
 	/* if dentry was never visible to RCU, immediate free is OK */
+	// 덴트리가 메모리에 할당은 되었지만, 아직 해시 리스트에 추가되지 않아
+	// RCU로 보호받지 않는 상태인 경우, 콜백함수를 통해 해제하지 않고
+	// 바로 해제한다.
 	if (!(dentry->d_flags & DCACHE_RCUACCESS))
 		__d_free(&dentry->d_u.d_rcu);
 	else
+		// RCU로 보호받는 경우 덴트리를 메모리에서 해제하는 __d_free
+		// 함수를 콜백함수로 등록한다.
 		call_rcu(&dentry->d_u.d_rcu, __d_free);
 }
 
@@ -985,18 +1004,29 @@ static void shrink_dentry_list(struct list_head *list)
 			continue;
 		}
 
-		// 이미 덴트리 캐시에서 해제된 경우 예외처리.
+		// *** __dentry_kill 루틴에서 ------ ***
+		// 1. DCACHE_DENTRY_KILLED
+		// - 덴트리 구조체안에 리스트들이 unlink 되었고,
+		//   d_lockref.count를 -128로 설정하여 덴트리가
+		//   unrecoverably dead 상태가 되었음을 의미함
+		// 2. DCACHE_MAY_FREE
+		// - 1번 작업을 마친 뒤, 덴트리가 shrink list에 
+		//   있는지 검사한다.
+		//   true - MAY_FREE 플래그 세팅, 메모리 해제 안함
+		//   false - 메모리 해제
+		// *** ------------------------------ ***
 		if (unlikely(dentry->d_flags & DCACHE_DENTRY_KILLED)) {
 			bool can_free = dentry->d_flags & DCACHE_MAY_FREE;
 			spin_unlock(&dentry->d_lock);
 			if (parent)
 				spin_unlock(&parent->d_lock);
 			if (can_free)
-				// TODO: 여기부터 분석.
+				// __dentry_kill에서 메모리 해제를 하지않은 경우
 				dentry_free(dentry);
 			continue;
 		}
 
+		// TODO: 여기부터.
 		inode = dentry->d_inode;
 		if (inode && unlikely(!spin_trylock(&inode->i_lock))) {
 			d_shrink_add(dentry, list);

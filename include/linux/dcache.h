@@ -79,6 +79,7 @@ extern struct dentry_stat_t dentry_stat;
 # endif
 #endif
 
+// 덴트리 구조체의 멤버를 수정할 경우 잡는 per dentry lock. (spinlock)
 #define d_lock	d_lockref.lock
 
 struct dentry {
@@ -93,6 +94,8 @@ struct dentry {
 	unsigned char d_iname[DNAME_INLINE_LEN];	/* small names */
 
 	/* Ref lookup also touches following */
+	// 덴트리 참조 카운트를 관리. lockref 구조체 안에 있는 스핀락은
+	// per-dentry 스핀락으로 사용한다.
 	struct lockref d_lockref;	/* per-dentry lock and refcount */
 	const struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */

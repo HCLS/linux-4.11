@@ -537,12 +537,19 @@ static void __dentry_kill(struct dentry *dentry)
 	/*
 	 * The dentry is now unrecoverably dead to the world.
 	 */
+	// d_lockref.count = -128
+	// reference count를 더 이상 변경할 수 없다.
+	// d_lockref.lock은 구조적으로 잡을 수는 있다.
 	lockref_mark_dead(&dentry->d_lockref);
 
 	/*
 	 * inform the fs via d_prune that this dentry is about to be
 	 * unhashed and destroyed.
 	 */
+	// d_prune은 파일시스템이 네트워크로 연결된 경우,
+	// 덴트리 캐시를 삭제하기전에 수행해주는 정리작업이다.
+	// e.g.) ceph의 경우에는 부모 덴트리의 COMPLETE 플래그를 해제하여
+	// 더 이상 모든 자식 덴트리가 로컬에 캐싱되어 있지 않음을 나타낸다.
 	if (dentry->d_flags & DCACHE_OP_PRUNE)
 		dentry->d_op->d_prune(dentry);
 
@@ -1026,8 +1033,10 @@ static void shrink_dentry_list(struct list_head *list)
 			continue;
 		}
 
-		// TODO: 여기부터.
 		inode = dentry->d_inode;
+		// inode가 존재하지만 inode의 스핀락을 얻지 못한 경우,
+		// 다시 shrink list에 추가하고 덴트리 스핀락을 해제한다.
+		// 즉, 다음 기회에 다시 해제를 시도한다.
 		if (inode && unlikely(!spin_trylock(&inode->i_lock))) {
 			d_shrink_add(dentry, list);
 			spin_unlock(&dentry->d_lock);

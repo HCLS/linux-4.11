@@ -93,6 +93,8 @@ static inline void __hlist_bl_del(struct hlist_bl_node *n)
 	LIST_BL_BUG_ON((unsigned long)n & LIST_BL_LOCKMASK);
 
 	/* pprev may be `first`, so be careful not to lose the lock bit */
+	// pprev가 first일 수 있으므로, *pprev의 lock bit를 추출하고 
+	// next의 값과 마스킹 한 후 *pprev에 대입하여 lock을 유지한다.
 	WRITE_ONCE(*pprev,
 		   (struct hlist_bl_node *)
 			((unsigned long)next |

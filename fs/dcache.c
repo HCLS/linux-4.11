@@ -466,16 +466,21 @@ void __d_drop(struct dentry *dentry)
 		 * with the exception of those newly allocated by
 		 * d_obtain_alias, which are always IS_ROOT:
 		 */
+		// NFS 에서 사용되는 것 같다. 이슈로 우선 남겨놓음.
 		if (unlikely(IS_ROOT(dentry)))
 			b = &dentry->d_sb->s_anon;
 		else
+			// qstr 구조체의 hash 값으로 연결되어 있는 
+			// hlist_bl_head 를 구해온다.
 			b = d_hash(dentry->d_name.hash);
 
+		// 삭제하고자 하는 덴트리를 해시 리스트에서 제거.
 		hlist_bl_lock(b);
 		__hlist_bl_del(&dentry->d_hash);
 		dentry->d_hash.pprev = NULL;
 		hlist_bl_unlock(b);
 		/* After this call, in-progress rcu-walk path lookup will fail. */
+		// TODO: 여기서부터 분석.
 		write_seqcount_invalidate(&dentry->d_seq);
 	}
 }
@@ -553,10 +558,13 @@ static void __dentry_kill(struct dentry *dentry)
 	if (dentry->d_flags & DCACHE_OP_PRUNE)
 		dentry->d_op->d_prune(dentry);
 
+	// LRU 리스트에 있고 shrink 리스트에 없으면 삭제.
+	// 다만, shrink 리스트에 있으면 shrink_dentry_list() 함수에서
+	// 삭제해줄 것이므로 구태여 여기서 삭제하지 않는다.
 	if (dentry->d_flags & DCACHE_LRU_LIST) {
 		if (!(dentry->d_flags & DCACHE_SHRINK_LIST))
 			d_lru_del(dentry);
-	}
+	} 
 	/* if it was on the hash then remove it */
 	__d_drop(dentry);
 	dentry_unlist(dentry, parent);

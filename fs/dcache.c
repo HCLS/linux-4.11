@@ -340,6 +340,7 @@ static void dentry_free(struct dentry *dentry)
  * d_iput() operation if defined.
  */
 static void dentry_unlink_inode(struct dentry * dentry)
+	// 함수 속성으로써, 진입 시 락이 걸려있는지 확인한다.
 	__releases(dentry->d_lock)
 	__releases(dentry->d_inode->i_lock)
 {
@@ -348,6 +349,7 @@ static void dentry_unlink_inode(struct dentry * dentry)
 
 	if (hashed)
 		raw_write_seqcount_begin(&dentry->d_seq);
+	// TODO: 여기서부터.
 	__d_clear_type_and_inode(dentry);
 	hlist_del_init(&dentry->d_u.d_alias);
 	if (hashed)
@@ -480,7 +482,6 @@ void __d_drop(struct dentry *dentry)
 		dentry->d_hash.pprev = NULL;
 		hlist_bl_unlock(b);
 		/* After this call, in-progress rcu-walk path lookup will fail. */
-		// TODO: 여기서부터 분석.
 		write_seqcount_invalidate(&dentry->d_seq);
 	}
 }
@@ -566,6 +567,7 @@ static void __dentry_kill(struct dentry *dentry)
 			d_lru_del(dentry);
 	} 
 	/* if it was on the hash then remove it */
+	// Hash 리스트에서 제거하고 write sequence lock invalidate.
 	__d_drop(dentry);
 	dentry_unlist(dentry, parent);
 	if (parent)

@@ -349,15 +349,18 @@ static void dentry_unlink_inode(struct dentry * dentry)
 
 	if (hashed)
 		raw_write_seqcount_begin(&dentry->d_seq);
-	// TODO: 여기서부터.
 	__d_clear_type_and_inode(dentry);
 	hlist_del_init(&dentry->d_u.d_alias);
 	if (hashed)
 		raw_write_seqcount_end(&dentry->d_seq);
 	spin_unlock(&dentry->d_lock);
 	spin_unlock(&inode->i_lock);
+	// 아이노드의 하드링크 카운트가 0인 경우 진입하여
+	// FS_DELETE_SELF 이벤트를 fsnotify group에알리고
+	// 남은 fsnotify_marks를 모두 삭제한다.
 	if (!inode->i_nlink)
 		fsnotify_inoderemove(inode);
+	// TODO: 여기서부터.
 	if (dentry->d_op && dentry->d_op->d_iput)
 		dentry->d_op->d_iput(dentry, inode);
 	else

@@ -176,6 +176,8 @@ static int send_to_group(struct inode *to_tell,
 	if (!inode_test_mask && !vfsmount_test_mask)
 		return 0;
 
+	// handle_event에서 최종적인 알림 처리를 한다.
+	// (추후 자세히 분석)
 	return group->ops->handle_event(group, to_tell, inode_mark,
 					vfsmount_mark, mask, data, data_is,
 					file_name, cookie);
@@ -187,6 +189,7 @@ static int send_to_group(struct inode *to_tell,
  * out to all of the registered fsnotify_group.  Those groups can then use the
  * notification event in whatever means they feel necessary.
  */
+// fsnotify(inode, FS_DELETE_SELF, inode, FSNOTIFY_EVENT_INODE, NULL, 0)
 int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	     const unsigned char *file_name, u32 cookie)
 {
@@ -198,6 +201,8 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	/* global tests shouldn't care about events on child only the specific event */
 	__u32 test_mask = (mask & ~FS_EVENT_ON_CHILD);
 
+	// data 인자로 넘어온 값이 경로인 경우 경로를 이용하여 마운트
+	// 구조체를 가져온다.
 	if (data_is == FSNOTIFY_EVENT_PATH)
 		mnt = real_mount(((const struct path *)data)->mnt);
 	else
@@ -210,6 +215,9 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	 * SRCU because we have no references to any objects and do not
 	 * need SRCU to keep them "alive".
 	 */
+	// inotify 시스템 콜을 이용하여  inode마다 알림을 받을 event를 
+	// 등록해놓을 수 있다. 현재 아이노드(to_tell)에 event가 하나도
+	// 등록되어 있지 않은경우 return 0.
 	if (hlist_empty(&to_tell->i_fsnotify_marks) &&
 	    (!mnt || hlist_empty(&mnt->mnt_fsnotify_marks)))
 		return 0;
@@ -218,6 +226,7 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 	 * otherwise return if neither the inode nor the vfsmount care about
 	 * this type of event.
 	 */
+	// 등록되어 있는 이벤트가 test_mask 이벤트와 같은지 확인.
 	if (!(mask & FS_MODIFY) &&
 	    !(test_mask & to_tell->i_fsnotify_mask) &&
 	    !(mnt && test_mask & mnt->mnt_fsnotify_mask))
@@ -264,6 +273,9 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 		if (inode_group && vfsmount_group) {
 			int cmp = fsnotify_compare_groups(inode_group,
 							  vfsmount_group);
+			// inode_group과 vfsmount_group의 우선순위가 다른경우,
+			// 낮은 우선순위 그룹은 다음번 루프에서 다시 우선순위를
+			// 비교하여 알림을 보낼지 결정한다.
 			if (cmp > 0) {
 				inode_group = NULL;
 				inode_mark = NULL;
@@ -278,6 +290,7 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 		if (ret && (mask & ALL_FSNOTIFY_PERM_EVENTS))
 			goto out;
 
+		// 알림을 보낸 그룹만 next로 넘어간다.
 		if (inode_group)
 			inode_node = srcu_dereference(inode_node->next,
 						      &fsnotify_mark_srcu);

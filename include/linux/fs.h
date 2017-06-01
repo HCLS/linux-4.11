@@ -580,6 +580,7 @@ struct inode {
 	 *    (set|clear|inc|drop)_nlink
 	 *    inode_(inc|dec)_link_count
 	 */
+	// 하드링크 카운트
 	union {
 		const unsigned int i_nlink;
 		unsigned int __i_nlink;

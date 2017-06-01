@@ -132,6 +132,8 @@ static inline void fsnotify_nameremove(struct dentry *dentry, int isdir)
 static inline void fsnotify_inoderemove(struct inode *inode)
 {
 	fsnotify(inode, FS_DELETE_SELF, inode, FSNOTIFY_EVENT_INODE, NULL, 0);
+	// notify는 일회용이다. 한번 알림을 보냈으면 삭제한다.
+	// 그러나 여기선 inode의 하드링크가 0인 경우이므로 모든 mark를 지운다.
 	__fsnotify_inode_delete(inode);
 }
 

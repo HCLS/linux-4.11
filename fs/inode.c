@@ -1491,8 +1491,12 @@ static void iput_final(struct inode *inode)
 	else
 		drop = generic_drop_inode(inode);
 
+	// MS_ACTIVE: mount나 umount가 사용자에게 허용된 상태
 	if (!drop && (sb->s_flags & MS_ACTIVE)) {
+		// 최근에 참조하였기 때문에 I_REFERENCED 플래그를
+		// 설정하고, lru 리스트에 추가한다.
 		inode->i_state |= I_REFERENCED;
+		// TODO: 여기부터 해석.
 		inode_add_lru(inode);
 		spin_unlock(&inode->i_lock);
 		return;
@@ -1528,14 +1532,19 @@ void iput(struct inode *inode)
 {
 	if (!inode)
 		return;
+	// 아이노드가 clean 상태이며 destroy 가능한 상태인 경우.
 	BUG_ON(inode->i_state & I_CLEAR);
 retry:
+	// i_count를 1 감소시키고, i_count가 0이면 i_lock을 잡는다.
 	if (atomic_dec_and_lock(&inode->i_count, &inode->i_lock)) {
+		// 연결되어 있는 덴트리 구조체의 수가 0이 아니거나,
+		// I_DIRTY_TIME 플래그가 set 되어있는 경우 진입.
 		if (inode->i_nlink && (inode->i_state & I_DIRTY_TIME)) {
 			atomic_inc(&inode->i_count);
 			inode->i_state &= ~I_DIRTY_TIME;
 			spin_unlock(&inode->i_lock);
 			trace_writeback_lazytime_iput(inode);
+			// 아이노드를 슈퍼블록의 더티 리스트에 넣는다.
 			mark_inode_dirty_sync(inode);
 			goto retry;
 		}

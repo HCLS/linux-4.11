@@ -360,7 +360,13 @@ static void dentry_unlink_inode(struct dentry * dentry)
 	// 남은 fsnotify_marks를 모두 삭제한다.
 	if (!inode->i_nlink)
 		fsnotify_inoderemove(inode);
-	// TODO: 여기서부터.
+	// 덴트리 객체가 가리키는 아이노드가 없어진 경우
+	// VFS가 호출하는 함수. 기본적으로 VFS는 iput()
+	// 함수를 호출해 해당 아이노드 객체를 해제하는
+	// 일만 한다. 파일시스템에서 별도로 이 함수를
+	// 구현하는 경우에도(e.g. - NFS) 해당 파일시스템에서
+	// 필요한 처리와 함께 iput() 함수를 호출한다.
+	// - 리눅스 커널 심층분석 (개정 3판)
 	if (dentry->d_op && dentry->d_op->d_iput)
 		dentry->d_op->d_iput(dentry, inode);
 	else

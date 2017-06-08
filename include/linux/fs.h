@@ -616,6 +616,8 @@ struct inode {
 	u16			i_wb_frn_avg_time;
 	u16			i_wb_frn_history;
 #endif
+	// 아이노드의 lru 리스트는 슈퍼블록마다 존재한다.
+	// i_lru 필드를 이용하여 lru 리스트에 추가된다.
 	struct list_head	i_lru;		/* inode LRU list */
 	struct list_head	i_sb_list;
 	struct list_head	i_wb_list;	/* backing dev writeback list */

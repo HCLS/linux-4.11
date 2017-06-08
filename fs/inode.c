@@ -412,8 +412,13 @@ static void inode_lru_list_add(struct inode *inode)
  *
  * Needs inode->i_lock held.
  */
+// 아이노드의 lru 리스트에는 clean 상태이며 참조되지 않는 상태의
+// 아이노드들이 추가된다.
 void inode_add_lru(struct inode *inode)
 {
+	// {아이노드가 dirty 상태이거나, writeback 중이거나, 메모리에서 해제
+	// 중이거나, 참조되는 상태이거나, mount/umount가 사용자에게 허용되지
+	// 않는 상태가} 아니면 lru 리스트에 추가한다.
 	if (!(inode->i_state & (I_DIRTY_ALL | I_SYNC |
 				I_FREEING | I_WILL_FREE)) &&
 	    !atomic_read(&inode->i_count) && inode->i_sb->s_flags & MS_ACTIVE)
@@ -537,8 +542,10 @@ static void evict(struct inode *inode)
 	BUG_ON(!list_empty(&inode->i_lru));
 
 	if (!list_empty(&inode->i_io_list))
+		//?? Writeback I/O list에서 제거
 		inode_io_list_del(inode);
 
+	// 슈퍼블록의 아이노드 리스트에서 제거
 	inode_sb_list_del(inode);
 
 	/*
@@ -547,19 +554,25 @@ static void evict(struct inode *inode)
 	 * the inode has I_FREEING set, flusher thread won't start new work on
 	 * the inode.  We just have to wait for running writeback to finish.
 	 */
+	// I_SYNC 비트를 설정하고 I_SYNC 비트가 해제되길 기다린다.
+	//?? I_SYNC 비트는 writeback이 끝나면 해제된다.
 	inode_wait_for_writeback(inode);
 
 	if (op->evict_inode) {
 		op->evict_inode(inode);
 	} else {
+		//?? i_data 필드에 맵핑되어있는 모든 페이지를 truncate 한다.
 		truncate_inode_pages_final(&inode->i_data);
+		//?? I_CLEAR 플래그 설정.
 		clear_inode(inode);
 	}
+	//?? 장치파일인 경우 장치파일 해제.
 	if (S_ISBLK(inode->i_mode) && inode->i_bdev)
 		bd_forget(inode);
 	if (S_ISCHR(inode->i_mode) && inode->i_cdev)
 		cd_forget(inode);
 
+	// 아이노드 해시 리스트에서 제거.
 	remove_inode_hash(inode);
 
 	spin_lock(&inode->i_lock);
@@ -567,6 +580,7 @@ static void evict(struct inode *inode)
 	BUG_ON(inode->i_state != (I_FREEING | I_CLEAR));
 	spin_unlock(&inode->i_lock);
 
+	// TODO: 여기서부터 분석.
 	destroy_inode(inode);
 }
 
@@ -1496,21 +1510,24 @@ static void iput_final(struct inode *inode)
 		// 최근에 참조하였기 때문에 I_REFERENCED 플래그를
 		// 설정하고, lru 리스트에 추가한다.
 		inode->i_state |= I_REFERENCED;
-		// TODO: 여기부터 해석.
 		inode_add_lru(inode);
 		spin_unlock(&inode->i_lock);
 		return;
 	}
 
+	// drop: 하드링크 카운트가 0이거나, 해시되어있지 않은 상태
 	if (!drop) {
+		// I_WILL_FREE: 아이노드를 디스크에 쓰는 중
 		inode->i_state |= I_WILL_FREE;
 		spin_unlock(&inode->i_lock);
+		//?? 아이노드를 디스크에 동기적으로 쓴다.
 		write_inode_now(inode, 1);
 		spin_lock(&inode->i_lock);
 		WARN_ON(inode->i_state & I_NEW);
 		inode->i_state &= ~I_WILL_FREE;
 	}
 
+	// I_FREEING: 아이노드를 메모리에서 해제하는 중
 	inode->i_state |= I_FREEING;
 	if (!list_empty(&inode->i_lru))
 		inode_lru_list_del(inode);
@@ -1543,6 +1560,7 @@ retry:
 			atomic_inc(&inode->i_count);
 			inode->i_state &= ~I_DIRTY_TIME;
 			spin_unlock(&inode->i_lock);
+			// ??
 			trace_writeback_lazytime_iput(inode);
 			// 아이노드를 슈퍼블록의 더티 리스트에 넣는다.
 			mark_inode_dirty_sync(inode);

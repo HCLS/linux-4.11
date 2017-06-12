@@ -582,6 +582,7 @@ static void __dentry_kill(struct dentry *dentry)
 	if (parent)
 		spin_unlock(&parent->d_lock);
 	if (dentry->d_inode)
+		// d_inode 링크를 해제하고, iput()을 호출한다.
 		dentry_unlink_inode(dentry);
 	else
 		spin_unlock(&dentry->d_lock);
@@ -590,6 +591,8 @@ static void __dentry_kill(struct dentry *dentry)
 		dentry->d_op->d_release(dentry);
 
 	spin_lock(&dentry->d_lock);
+	// 덴트리가 shrink list에 있는경우, 메모리 해제 작업은
+	// 다른 루틴에서 수행하도록 미룬다.
 	if (dentry->d_flags & DCACHE_SHRINK_LIST) {
 		dentry->d_flags |= DCACHE_MAY_FREE;
 		can_free = false;
@@ -1064,6 +1067,7 @@ static void shrink_dentry_list(struct list_head *list)
 			continue;
 		}
 
+		// 덴트리 해제.
 		__dentry_kill(dentry);
 
 		/*
@@ -1072,9 +1076,14 @@ static void shrink_dentry_list(struct list_head *list)
 		 * expected to be beneficial in reducing dentry cache
 		 * fragmentation.
 		 */
+		// 부모 덴트리가 존재하고 현재 루틴만 부모 덴트리를 참조하고
+		// 있는 경우에만 스핀락을 잡고 진입하여 부모 덴트리를 해제한다.
+		// (반복)
 		dentry = parent;
 		while (dentry && !lockref_put_or_lock(&dentry->d_lockref)) {
 			parent = lock_parent(dentry);
+			// 덴트리 참조 카운트가 증가한 경우, 참조 카운트를
+			// 낮추고 루프를 탈출한다.
 			if (dentry->d_lockref.count != 1) {
 				dentry->d_lockref.count--;
 				spin_unlock(&dentry->d_lock);
@@ -1084,12 +1093,18 @@ static void shrink_dentry_list(struct list_head *list)
 			}
 			inode = dentry->d_inode;	/* can't be NULL */
 			if (unlikely(!spin_trylock(&inode->i_lock))) {
+				// 아이노드 스핀락을 못잡은 경우 재시도
 				spin_unlock(&dentry->d_lock);
 				if (parent)
 					spin_unlock(&parent->d_lock);
+				// cpu_relax -> busy waiting
+				// 지나친 락 경쟁을 피하기 위해, 다시 덴트리
+				// 락을 얻기 전에 잠시 busy waiting 한다.
 				cpu_relax();
 				continue;
 			}
+			// 덴트리 해제. 다른데서 참조중인 조상 덴트리를 만나기
+			// 전까지 반복하여 덴트리를 해제한다.
 			__dentry_kill(dentry);
 			dentry = parent;
 		}
@@ -1528,6 +1543,7 @@ void shrink_dcache_parent(struct dentry *parent)
 		data.start = parent;
 		data.found = 0;
 
+		// TODO: 여기서부터 양보안하는 로직으로 분석.
 		d_walk(parent, &data, select_collect, NULL);
 		if (!data.found)
 			break;

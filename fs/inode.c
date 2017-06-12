@@ -580,7 +580,7 @@ static void evict(struct inode *inode)
 	BUG_ON(inode->i_state != (I_FREEING | I_CLEAR));
 	spin_unlock(&inode->i_lock);
 
-	// TODO: 여기서부터 분석.
+	//?? 아이노드 캐쉬에서 해제한다.
 	destroy_inode(inode);
 }
 

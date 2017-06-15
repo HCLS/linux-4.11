@@ -1301,6 +1301,7 @@ resume:
 		struct dentry *dentry = list_entry(tmp, struct dentry, d_child);
 		next = tmp->next;
 
+		// TODO: 여기서부터 분석.
 		if (unlikely(dentry->d_flags & DCACHE_DENTRY_CURSOR))
 			continue;
 
@@ -1488,7 +1489,7 @@ static enum d_walk_ret select_collect(void *_data, struct dentry *dentry)
 	struct select_data *data = _data;
 	enum d_walk_ret ret = D_WALK_CONTINUE;
 
-	// select_dat->start가 마운트 포인트면 D_WALK_CONTINUE 리턴.
+	// select_data->start가 마운트 포인트면 D_WALK_CONTINUE 리턴.
 	if (data->start == dentry)
 		goto out;
 
@@ -1543,7 +1544,6 @@ void shrink_dcache_parent(struct dentry *parent)
 		data.start = parent;
 		data.found = 0;
 
-		// TODO: 여기서부터 양보안하는 로직으로 분석.
 		d_walk(parent, &data, select_collect, NULL);
 		if (!data.found)
 			break;
@@ -1594,6 +1594,7 @@ void shrink_dcache_for_umount(struct super_block *sb)
 
 	WARN(down_read_trylock(&sb->s_umount), "s_umount should've been locked");
 
+	// sb->s_root = 디렉토리 마운트 지점.
 	dentry = sb->s_root;
 	sb->s_root = NULL;
 	do_one_tree(dentry);

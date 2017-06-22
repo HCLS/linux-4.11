@@ -693,6 +693,7 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * If we have a d_op->d_delete() operation, we sould not
 	 * let the dentry count go to zero, so use "put_or_lock".
 	 */
+	// TODO: 여기서부터
 	if (unlikely(dentry->d_flags & DCACHE_OP_DELETE))
 		return lockref_put_or_lock(&dentry->d_lockref);
 		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
@@ -816,6 +817,7 @@ repeat:
 	might_sleep();
 
 	rcu_read_lock();
+	// lockless dput을 시도함
 	if (likely(fast_dput(dentry))) {
 		rcu_read_unlock();
 		return;
@@ -1301,7 +1303,6 @@ resume:
 		struct dentry *dentry = list_entry(tmp, struct dentry, d_child);
 		next = tmp->next;
 
-		// TODO: 여기서부터 분석.
 		if (unlikely(dentry->d_flags & DCACHE_DENTRY_CURSOR))
 			continue;
 
@@ -1322,6 +1323,7 @@ resume:
 			continue;
 		}
 
+		// 서브디렉토리로 내려가는 경우
 		if (!list_empty(&dentry->d_subdirs)) {
 			spin_unlock(&this_parent->d_lock);
 			spin_release(&dentry->d_lock.dep_map, 1, _RET_IP_);
@@ -1335,7 +1337,9 @@ resume:
 	 * All done at this level ... ascend and resume the search.
 	 */
 	rcu_read_lock();
+// ascend: 서브디렉토리 탐색을 마치고 부모로 올라갈 때
 ascend:
+	// this_parent == parent -> 순회를 마치고 시작지점으로 돌아왔을 때
 	if (this_parent != parent) {
 		struct dentry *child = this_parent;
 		this_parent = child->d_parent;
@@ -1363,7 +1367,6 @@ ascend:
 		finish(data);
 
 out_unlock:
-	// Lock 해제.
 	spin_unlock(&this_parent->d_lock);
 	done_seqretry(&rename_lock, seq);
 	return;
@@ -1536,6 +1539,9 @@ out:
 // 메모리 확보가 필요한 경우에는 사용하지 않는 덴트리를 폐기할 수 있다.
 void shrink_dcache_parent(struct dentry *parent)
 {
+	// parent는 해제하지 않음
+	// 단, shrink_dentry_list() 루틴의 prune ancestor 동작중에
+	// 해제될 가능성이 있다.
 	for (;;) {
 		struct select_data data;
 
@@ -1580,6 +1586,8 @@ static enum d_walk_ret umount_check(void *_data, struct dentry *dentry)
 static void do_one_tree(struct dentry *dentry)
 {
 	shrink_dcache_parent(dentry);
+	// 마운트 포인트의 하위 덴트리 중 사용중인 덴트리를 찾아
+	// 경고 메세지를 찍어준다.
 	d_walk(dentry, dentry, umount_check, NULL);
 	d_drop(dentry);
 	dput(dentry);
@@ -1597,6 +1605,9 @@ void shrink_dcache_for_umount(struct super_block *sb)
 	// sb->s_root = 디렉토리 마운트 지점.
 	dentry = sb->s_root;
 	sb->s_root = NULL;
+	// dentry의 서브트리를 순회하며, 가능한 모든 덴트리&아이노드를 해제하고,
+	// writeback을 수행한다. 사용중인 덴트리가 남아있는 경우, umount_check()에서
+	// 에러 메세지를 남겨주고 dentry를 해제한다.
 	do_one_tree(dentry);
 
 	while (!hlist_bl_empty(&sb->s_anon)) {

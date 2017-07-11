@@ -477,7 +477,9 @@ void __d_drop(struct dentry *dentry)
 		 * with the exception of those newly allocated by
 		 * d_obtain_alias, which are always IS_ROOT:
 		 */
-		// NFS 에서 사용되는 것 같다. 이슈로 우선 남겨놓음.
+		// 모든 dentry는 보통 root와 연결되는데, NFS는 그렇지 않은 경우가 있다.
+		// root와 연결되지 않은(DCACHE_DISCONNECTED가 설정된) dentry 들을
+		// d_sb->s_anon 리스트에 등록한다.
 		if (unlikely(IS_ROOT(dentry)))
 			b = &dentry->d_sb->s_anon;
 		else
@@ -705,7 +707,8 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * .. otherwise, we can try to just decrement the
 	 * lockref optimistically.
 	 */
-	// refcount가 1이상이면 1줄이고, 아니면 error(-1).
+	// refcount가 1이상인 경우에는 1을 줄인다.
+	// 다른 프로세스가 락을 잡고 있거나, refcount가 1보다 작으면 error(-1).
 	ret = lockref_put_return(&dentry->d_lockref);
 
 	/*
@@ -713,7 +716,8 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * by somebody else, the fast path has failed. We will need to
 	 * get the lock, and then check the count again.
 	 */
-	// refcount가 0이하면 fast_dput은 실패 
+	// refcount가 0이하면 fast_dput의 fast path는 실패,
+	// 아래 블록은 fast_dput의 slow path.
 	if (unlikely(ret < 0)) {
 		spin_lock(&dentry->d_lock);
 		if (dentry->d_lockref.count > 1) {
@@ -727,7 +731,6 @@ static inline bool fast_dput(struct dentry *dentry)
 	/*
 	 * If we weren't the last ref, we're done.
 	 */
-	// TODO: 여기서부터..
 	if (ret)
 		return 1;
 
@@ -752,11 +755,18 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * our work is done - we can leave the dentry
 	 * around with a zero refcount.
 	 */
+	// 지금 현재 reference count는 0이지만, 덴트리 락을 잡고 있지 않은 상태이다.
+	// 따라서 멀티코어 상황에서 다른 프로세서와 race condition이 발생할 수 있다.
+	// 이를 방지하기 위해 smp_rmb()를 사용한다.
 	smp_rmb();
+	// d_flags를 메모리에서 읽어온다.
 	d_flags = ACCESS_ONCE(dentry->d_flags);
 	d_flags &= DCACHE_REFERENCED | DCACHE_LRU_LIST | DCACHE_DISCONNECTED;
 
 	/* Nothing to do? Dropping the reference was all we needed? */
+	// (DCACHE_REFERENCED와 DCACHE_LRU_LIST플래그가 설정되어있고,
+	// DCACHE_DISCONNECTED 플래그는 설정되어 있지 않은 경우)
+	// && (해시리스트에 있으면) 1을 리턴한다.
 	if (d_flags == (DCACHE_REFERENCED | DCACHE_LRU_LIST) && !d_unhashed(dentry))
 		return 1;
 
@@ -773,6 +783,7 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * else could have killed it and marked it dead. Either way, we
 	 * don't need to do anything else.
 	 */
+	// 덴트리를 다른 누군가 참조중이면 락을 해제하고 1을 리턴한다.
 	if (dentry->d_lockref.count) {
 		spin_unlock(&dentry->d_lock);
 		return 1;
@@ -783,6 +794,10 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * lock, and we just tested that it was zero, so we can just
 	 * set it to 1.
 	 */
+	// 덴트리를 아무도 참조하고 있지 않은 경우
+	// 현재 프로세스에서 락을 잡고있기 때문에,
+	// 레퍼런스 카운트를 1로 만든다.
+	// fast_dput은 실패(0 리턴)
 	dentry->d_lockref.count = 1;
 	return 0;
 }
@@ -824,6 +839,8 @@ repeat:
 
 	rcu_read_lock();
 	// lockless dput을 시도함
+	// fast_dput() 성공 시 1 : --refcount > 0,
+	// fast_dput() 실패 시 0 : 현재 프로세스가 덴트리를 마지막으로 참조
 	if (likely(fast_dput(dentry))) {
 		rcu_read_unlock();
 		return;
@@ -838,6 +855,7 @@ repeat:
 	if (unlikely(d_unhashed(dentry)))
 		goto kill_it;
 
+	// Dentry tree에서 현재 dentry부터 root dentry까지 완전히 연결되지 않은 경우
 	if (unlikely(dentry->d_flags & DCACHE_DISCONNECTED))
 		goto kill_it;
 
@@ -846,8 +864,11 @@ repeat:
 			goto kill_it;
 	}
 
+	// (아마도) 최근에 참조 되었기 때문에 LRU 축출 대상에 선정되었을 경우
+	// 한 번 더 기회를 준다. (아마도....)
 	if (!(dentry->d_flags & DCACHE_REFERENCED))
 		dentry->d_flags |= DCACHE_REFERENCED;
+
 	dentry_lru_add(dentry);
 
 	dentry->d_lockref.count--;
@@ -855,6 +876,8 @@ repeat:
 	return;
 
 kill_it:
+	// dentry_kill : 성공하면 parent, 실패하면 dentry 리턴
+	// 실패한 경우 dentry에 대해 d_put() 재시도
 	dentry = dentry_kill(dentry);
 	if (dentry) {
 		cond_resched();
@@ -1591,11 +1614,18 @@ static enum d_walk_ret umount_check(void *_data, struct dentry *dentry)
 
 static void do_one_tree(struct dentry *dentry)
 {
+	// 마운트 포인트의 하위 덴트리를 순회하며 참조되지 않는 덴트리와 그 아이노드를
+	// 찾아 메모리에서 해제시킨다.
 	shrink_dcache_parent(dentry);
 	// 마운트 포인트의 하위 덴트리 중 사용중인 덴트리를 찾아
 	// 경고 메세지를 찍어준다.
 	d_walk(dentry, dentry, umount_check, NULL);
+	// 마운트 포인트 덴트리를 해시 리스트에서 제거한다.
 	d_drop(dentry);
+	// 마운트 포인트 덴트리를
+	// 1. (해시 리스트에 없거나, DISCONNECTED 상태인 경우) 메모리에서 해제
+	// 2. (현재 프로세스가 마지막 참조 프로세스인 경우) lru 리스트 이동
+	// 3. (덴트리가 다른 프로세스에 의해 참조되는 경우) 레퍼런스 카운트만 1 낮춤
 	dput(dentry);
 }
 
@@ -1612,10 +1642,12 @@ void shrink_dcache_for_umount(struct super_block *sb)
 	dentry = sb->s_root;
 	sb->s_root = NULL;
 	// dentry의 서브트리를 순회하며, 가능한 모든 덴트리&아이노드를 해제하고,
-	// writeback을 수행한다. 사용중인 덴트리가 남아있는 경우, umount_check()에서
-	// 에러 메세지를 남겨주고 dentry를 해제한다.
+	// 디바이스에 기록한다. 사용중인 덴트리가 남아있는 경우, umount_check()에서
+	// 에러 메세지를 남겨주며 마운트 포인트 덴트리를 해시 리스트에서 제거한다.
 	do_one_tree(dentry);
 
+	// s_anon 리스트에 속한 dentry는 d_hash 필드를 이용해서 연결되기 때문에,
+	// do_one_tree()의 d_drop() 과정에서 리스트에서 제거된다.
 	while (!hlist_bl_empty(&sb->s_anon)) {
 		dentry = dget(hlist_bl_entry(hlist_bl_first(&sb->s_anon), struct dentry, d_hash));
 		do_one_tree(dentry);

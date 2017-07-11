@@ -419,10 +419,16 @@ void generic_shutdown_super(struct super_block *sb)
 
 	// 마운트 포인트 덴트리가 유효할 때,
 	if (sb->s_root) {
+		// 해제 가능한 dentry 및 inode 해제
 		shrink_dcache_for_umount(sb);
+
+		//?!? writeback 공부하고 재도전.. 
 		sync_filesystem(sb);
+
+		// 슈퍼블록을 mount나 umount가 불가능한 상태로 만듬
 		sb->s_flags &= ~MS_ACTIVE;
 
+		// TODO: 여기서부터...
 		fsnotify_unmount_inodes(sb);
 		cgroup_writeback_umount();
 

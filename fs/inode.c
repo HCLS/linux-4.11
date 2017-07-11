@@ -542,7 +542,7 @@ static void evict(struct inode *inode)
 	BUG_ON(!list_empty(&inode->i_lru));
 
 	if (!list_empty(&inode->i_io_list))
-		//?? Writeback I/O list에서 제거
+		//?!? Writeback I/O list에서 제거
 		inode_io_list_del(inode);
 
 	// 슈퍼블록의 아이노드 리스트에서 제거
@@ -555,18 +555,18 @@ static void evict(struct inode *inode)
 	 * the inode.  We just have to wait for running writeback to finish.
 	 */
 	// I_SYNC 비트를 설정하고 I_SYNC 비트가 해제되길 기다린다.
-	//?? I_SYNC 비트는 writeback이 끝나면 해제된다.
+	//?!? I_SYNC 비트는 writeback이 끝나면 해제된다.
 	inode_wait_for_writeback(inode);
 
 	if (op->evict_inode) {
 		op->evict_inode(inode);
 	} else {
-		//?? i_data 필드에 맵핑되어있는 모든 페이지를 truncate 한다.
+		//?!? i_data 필드에 맵핑되어있는 모든 페이지를 truncate 한다.
 		truncate_inode_pages_final(&inode->i_data);
-		//?? I_CLEAR 플래그 설정.
+		//?!? I_CLEAR 플래그 설정.
 		clear_inode(inode);
 	}
-	//?? 장치파일인 경우 장치파일 해제.
+	//?!? 장치파일인 경우 장치파일 해제.
 	if (S_ISBLK(inode->i_mode) && inode->i_bdev)
 		bd_forget(inode);
 	if (S_ISCHR(inode->i_mode) && inode->i_cdev)
@@ -580,7 +580,7 @@ static void evict(struct inode *inode)
 	BUG_ON(inode->i_state != (I_FREEING | I_CLEAR));
 	spin_unlock(&inode->i_lock);
 
-	//?? 아이노드 캐쉬에서 해제한다.
+	//?!? 아이노드 캐쉬에서 해제한다.
 	destroy_inode(inode);
 }
 
@@ -1520,7 +1520,7 @@ static void iput_final(struct inode *inode)
 		// I_WILL_FREE: 아이노드를 디스크에 쓰는 중
 		inode->i_state |= I_WILL_FREE;
 		spin_unlock(&inode->i_lock);
-		//?? 아이노드를 디스크에 동기적으로 쓴다.
+		//?!? 아이노드를 디스크에 동기적으로 쓴다.
 		write_inode_now(inode, 1);
 		spin_lock(&inode->i_lock);
 		WARN_ON(inode->i_state & I_NEW);
@@ -1560,7 +1560,7 @@ retry:
 			atomic_inc(&inode->i_count);
 			inode->i_state &= ~I_DIRTY_TIME;
 			spin_unlock(&inode->i_lock);
-			// ??
+			// ?!?
 			trace_writeback_lazytime_iput(inode);
 			// 아이노드를 슈퍼블록의 더티 리스트에 넣는다.
 			mark_inode_dirty_sync(inode);

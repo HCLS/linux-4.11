@@ -693,15 +693,19 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * If we have a d_op->d_delete() operation, we sould not
 	 * let the dentry count go to zero, so use "put_or_lock".
 	 */
-	// TODO: 여기서부터
+	// d_op->d_delete()와 같은 dentry operation은
+	// 대부분의 파일 시스템에서 사용하지 않는다.
 	if (unlikely(dentry->d_flags & DCACHE_OP_DELETE))
 		return lockref_put_or_lock(&dentry->d_lockref);
-		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+
+	// LXR에 아래 코드가 없음. 코드가 잘못 입력된 것인지 확인 필요
+	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
 
 	/*
 	 * .. otherwise, we can try to just decrement the
 	 * lockref optimistically.
 	 */
+	// refcount가 1이상이면 1줄이고, 아니면 error(-1).
 	ret = lockref_put_return(&dentry->d_lockref);
 
 	/*
@@ -709,6 +713,7 @@ static inline bool fast_dput(struct dentry *dentry)
 	 * by somebody else, the fast path has failed. We will need to
 	 * get the lock, and then check the count again.
 	 */
+	// refcount가 0이하면 fast_dput은 실패 
 	if (unlikely(ret < 0)) {
 		spin_lock(&dentry->d_lock);
 		if (dentry->d_lockref.count > 1) {
@@ -722,6 +727,7 @@ static inline bool fast_dput(struct dentry *dentry)
 	/*
 	 * If we weren't the last ref, we're done.
 	 */
+	// TODO: 여기서부터..
 	if (ret)
 		return 1;
 

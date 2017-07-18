@@ -160,6 +160,9 @@ void fsnotify_unmount_inodes(struct super_block *sb)
 		 * the inode cannot have any associated watches.
 		 */
 		spin_lock(&inode->i_lock);
+		// 아이노드가 해제 중이거나 초기화 상태이면 참조가 불가능하다.
+		// 다만, 어차피 watch를 가질 수 없는 상태이기도 하기 때문에
+		// 다음 루프로 넘어가도 무방하다.
 		if (inode->i_state & (I_FREEING|I_WILL_FREE|I_NEW)) {
 			spin_unlock(&inode->i_lock);
 			continue;
@@ -171,6 +174,17 @@ void fsnotify_unmount_inodes(struct super_block *sb)
 		 * evict all inodes with zero i_count from icache which is
 		 * unnecessarily violent and may in fact be illegal to do.
 		 */
+		// i_count가 0이면, watches도 없다는 의미가 된다.
+		//
+		// 또한, MS_ACTIVE가 클리어된 상태의 아이노드는 iput 호출시
+		// evict 된다.
+		//
+		// 그러므로 현재 상태(~MS_ACTIVE)에서 i_count가 0인 
+		// 아이노드에__iget/iput을 과정을 거치게 하는 것은
+		// 결국 해당 아이노드를 evict하는 것이다.
+		//
+		// 이러한 동작은 구태여 할 필요가 없다. 
+		// 그러므로 i_count가 0이면, continue 한다.
 		if (!atomic_read(&inode->i_count)) {
 			spin_unlock(&inode->i_lock);
 			continue;
@@ -184,6 +198,11 @@ void fsnotify_unmount_inodes(struct super_block *sb)
 			iput(iput_inode);
 
 		/* for each watch, send FS_UNMOUNT and then remove it */
+		// FS_UNMOUNT 이벤트를 watch하는 watch에 알림을 보낸다.
+		// 그리고 아이노드에 마크되어있는 모든 watch를 삭제한다.
+		//
+		// ex.) umount시 모든 inotify의 watch는 삭제되고, 해당
+		// watch descriptor는 IN_IGNORED 알림을 받게된다.
 		fsnotify(inode, FS_UNMOUNT, inode, FSNOTIFY_EVENT_INODE, NULL, 0);
 
 		fsnotify_inode_delete(inode);

@@ -428,10 +428,13 @@ void generic_shutdown_super(struct super_block *sb)
 		// 슈퍼블록을 mount나 umount가 불가능한 상태로 만듬
 		sb->s_flags &= ~MS_ACTIVE;
 
-		// TODO: 여기서부터...
+		// watched inodes에 대하여 unmount event를 알리고
+		// 모든 watch를 삭제한다.
 		fsnotify_unmount_inodes(sb);
+		//?!? cgroup과 writeback을 공부하고 재도전..
 		cgroup_writeback_umount();
 
+		// TODO: 여기서부터 분석.
 		evict_inodes(sb);
 
 		if (sb->s_dio_done_wq) {

@@ -1287,6 +1287,9 @@ enum {
 
 #define SB_FREEZE_LEVELS (SB_FREEZE_COMPLETE - 1)
 
+// write 작업의 경우 rw_sem 에서 read lock을 획득하고,
+// freeze 작업의 경우 rw_sem에서 write lock을 획득한다.
+// frozen state는 SB_UNFROZEN부터 SB_FREEZE_COMPLETE까지 순차적으로 진행된다.
 struct sb_writers {
 	int				frozen;		/* Is sb frozen? */
 	wait_queue_head_t		wait_unfrozen;	/* for get_super_thawed() */
@@ -1327,6 +1330,7 @@ struct super_block {
 	unsigned int		s_quota_types;	/* Bitmask of supported quota types */
 	struct quota_info	s_dquot;	/* Diskquota specific options */
 
+	// 파일시스템 freeze를 위한 필드
 	struct sb_writers	s_writers;
 
 	char s_id[32];				/* Informational name */

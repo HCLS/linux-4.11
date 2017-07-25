@@ -434,14 +434,18 @@ void generic_shutdown_super(struct super_block *sb)
 		//?!? cgroup과 writeback을 공부하고 재도전..
 		cgroup_writeback_umount();
 
-		// TODO: 여기서부터 분석.
+		// 슈퍼블록의 아이노드 리스트 중 refcount가 0인 모든
+		// 아이노드를 아이노드 캐시에서 해제한다.
 		evict_inodes(sb);
 
+		//?!? s_dio_done_wq : direct io 중 비동기적으로 수행이
+		// 완료된 것들에 대한 후반부 처리인 것 같다.
 		if (sb->s_dio_done_wq) {
 			destroy_workqueue(sb->s_dio_done_wq);
 			sb->s_dio_done_wq = NULL;
 		}
 
+		// 슈퍼블록의 참조카운트를 감소시키고 0 이면 해제한다.
 		if (sop->put_super)
 			sop->put_super(sb);
 
@@ -453,8 +457,11 @@ void generic_shutdown_super(struct super_block *sb)
 	}
 	spin_lock(&sb_lock);
 	/* should be initialized for __put_super_and_need_restart() */
+	// 같은 파일시스템 타입을 사용하는 슈퍼블록간의 연결 리스트로부터 해제
 	hlist_del_init(&sb->s_instances);
 	spin_unlock(&sb_lock);
+	// 마운트 시에 잡았던 s_umount 락을 풀어준다.
+	// 동기화가 완료되었고 frozen 상태이기 때문에 언마운트를 허가해준다.
 	up_write(&sb->s_umount);
 }
 
@@ -1156,6 +1163,7 @@ void kill_block_super(struct super_block *sb)
 	// 장치에 저장된 슈퍼블록 포인터 해제.
 	bdev->bd_super = NULL;
 	generic_shutdown_super(sb);
+	// TODO: 여기서부터 분석
 	sync_blockdev(bdev);
 	WARN_ON_ONCE(!(mode & FMODE_EXCL));
 	blkdev_put(bdev, mode | FMODE_EXCL);

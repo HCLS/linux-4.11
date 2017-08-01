@@ -1163,7 +1163,7 @@ void kill_block_super(struct super_block *sb)
 	// 장치에 저장된 슈퍼블록 포인터 해제.
 	bdev->bd_super = NULL;
 	generic_shutdown_super(sb);
-	// TODO: 여기서부터 분석
+	//?!? 블록 장치와 관련된 더티한 페이지 동기화.
 	sync_blockdev(bdev);
 	WARN_ON_ONCE(!(mode & FMODE_EXCL));
 	blkdev_put(bdev, mode | FMODE_EXCL);

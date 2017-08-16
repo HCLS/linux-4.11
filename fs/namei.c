@@ -214,13 +214,29 @@ getname_kernel(const char * filename)
 	struct filename *result;
 	int len = strlen(filename) + 1;
 
+	// 새로운 파일 이름을 캐싱하기 위하여, name_cachep 
+	// 슬랩할당자에 메모리 공간 할당을 요청한다.
 	result = __getname();
 	if (unlikely(!result))
 		return ERR_PTR(-ENOMEM);
 
+	// __getname()을 통해 메모리 공간을 요청하면, 
+	// PATH_MAX 사이즈인 4K 만큼을 확보하여준다.
+	// EMBEDDED_NAME_MAX는 struct filename에서 iname
+	// 필드로부터 할당받은 4K 영역의 끝까지의 공간을 의미한다.
+	// 그러므로 만약 이름이 EMBEDDED_NAME_MAX보다 작거나 
+	// 같으면, name 포인터를 iname을 가리키게 하여 추가적인
+	// 메모리 할당 없이 이름을 캐싱할 수 있다.
 	if (len <= EMBEDDED_NAME_MAX) {
 		result->name = (char *)result->iname;
 	} else if (len <= PATH_MAX) {
+		// EMBEDDED_NAME_MAX 보다는 크고, PATH_MAX 보다
+		// 작은 경우, 할당받은 4K 공간을 오롯이 이름
+		// 저장에 사용한다. 이를 위해서 filename 구조체의
+		// 크기만큼 메모리를 동적할당 받고(슬랩을 통해
+		// 항상 4K 씩 받지않고 iname 필드 크기를 1바이트로
+		// 할당받음), 할당받은 구조체의 name필드가 슬랩을
+		// 통해 확보한 4K 영역을 가리키게 한다.
 		struct filename *tmp;
 
 		tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
@@ -2390,6 +2406,7 @@ struct dentry *kern_path_locked(const char *name, struct path *path)
 
 int kern_path(const char *name, unsigned int flags, struct path *path)
 {
+	// TODO: 여기서부터 분석
 	return filename_lookup(AT_FDCWD, getname_kernel(name),
 			       flags, path, NULL);
 }

@@ -2321,6 +2321,14 @@ struct filename {
 	const __user char	*uptr;	/* original userland pointer */
 	struct audit_names	*aname;
 	int			refcnt;
+	// Flexible array
+	// Array처럼 주소는 정해져 있는 상태이다.
+	// iname의 주소부터 뒤로는 쭉 쓸 수 있다.
+	// 사용자의 주의가 필요하며 다른 데이터를
+	// 덮어쓸 가능성이 있다. 주소가 정해져야 하기
+	// 때문에 구조체안에 쓰는게 일반적이며,
+	// 크기를 알 수 없기 때문에 구조체의 마지막
+	// 필드로 이용한다.
 	const char		iname[];
 };
 

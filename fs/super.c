@@ -1086,9 +1086,12 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 {
 	struct block_device *bdev;
 	struct super_block *s;
+	// FMODE_EXCL: 없는 파일은 O_CREAT을 안줘도 생성된다.
+	// 있는 파일은 O_CREAT으로 open했을 때 열리지 않는다.
 	fmode_t mode = FMODE_READ | FMODE_EXCL;
 	int error = 0;
 
+	// 읽기 전용으로 mount를 하지 않았다면, 쓰기 모드를 허용
 	if (!(flags & MS_RDONLY))
 		mode |= FMODE_WRITE;
 

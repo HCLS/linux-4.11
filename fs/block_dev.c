@@ -2185,6 +2185,7 @@ struct block_device *lookup_bdev(const char *pathname)
 	struct path path;
 	int error;
 
+	// 경로의 주소값이 NULL이거나, 경로값이 NULL인 경우
 	if (!pathname || !*pathname)
 		return ERR_PTR(-EINVAL);
 

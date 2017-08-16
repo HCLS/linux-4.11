@@ -952,6 +952,7 @@ static int simplefs_init(void)
 {
 	int ret;
 
+	// 아이노드 캐시를 위한 메모리 할당
 	sfs_inode_cachep = kmem_cache_create("sfs_inode_cache",
 	                                     sizeof(struct simplefs_inode),
 	                                     0,
@@ -961,6 +962,7 @@ static int simplefs_init(void)
 		return -ENOMEM;
 	}
 
+	// 파일시스템 등록
 	ret = register_filesystem(&simplefs_fs_type);
 	if (likely(ret == 0))
 		printk(KERN_INFO "Sucessfully registered simplefs\n");

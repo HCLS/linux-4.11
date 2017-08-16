@@ -30,6 +30,7 @@
  */
 
 static struct file_system_type *file_systems;
+// 파일시스템 드라이버를 관리하는 코드에서 사용하는 전역 락 변수.
 static DEFINE_RWLOCK(file_systems_lock);
 
 /* WARNING: This can be used only if we _already_ own a reference */
@@ -75,10 +76,12 @@ int register_filesystem(struct file_system_type * fs)
 	if (fs->next)
 		return -EBUSY;
 	write_lock(&file_systems_lock);
+	// 같은 이름의 파일시스템 드라이버는 등록할 수 없다.
 	p = find_filesystem(fs->name, strlen(fs->name));
 	if (*p)
 		res = -EBUSY;
 	else
+		// 파일 시스템 타입 리스트에 등록
 		*p = fs;
 	write_unlock(&file_systems_lock);
 	return res;

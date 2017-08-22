@@ -500,7 +500,9 @@ EXPORT_SYMBOL(inode_permission);
  */
 void path_get(const struct path *path)
 {
+	// mount reference count 증가
 	mntget(path->mnt);
+	// dentry reference count 증가
 	dget(path->dentry);
 }
 EXPORT_SYMBOL(path_get);
@@ -840,17 +842,23 @@ static int complete_walk(struct nameidata *nd)
 
 static void set_root(struct nameidata *nd)
 {
+	// 현재 프로세스의 파일시스템 정보를 가리킴
 	struct fs_struct *fs = current->fs;
 
 	if (nd->flags & LOOKUP_RCU) {
 		unsigned seq;
 
 		do {
+			// 프로세스가 갖고 있는 파일시스템 정보의 시퀀스 락을 읽는다.
+			// fs->root를 nd->root에 복사한다.
+			// 루트디렉토리의 시퀀스 락을 읽어 nd->root_seq에 저장한다.
 			seq = read_seqcount_begin(&fs->seq);
 			nd->root = fs->root;
 			nd->root_seq = __read_seqcount_begin(&nd->root.dentry->d_seq);
+			// 시퀀스가 변경되었으면 다시 시도한다.
 		} while (read_seqcount_retry(&fs->seq, seq));
 	} else {
+		// fs->root를 nd->root에 복사하고, 레퍼런스 카운트를 증가시킨다.
 		get_fs_root(fs, &nd->root);
 	}
 }
@@ -2159,14 +2167,18 @@ OK:
 static const char *path_init(struct nameidata *nd, unsigned flags)
 {
 	int retval = 0;
+	// s 는 찾고자 하는 실제 파일의 경로
 	const char *s = nd->name->name;
 
+	// 파일 경로가 null 값인 경우 LOOKUP_RCU 플래그를 해제
 	if (!*s)
 		flags &= ~LOOKUP_RCU;
 
 	nd->last_type = LAST_ROOT; /* if there are only slashes... */
 	nd->flags = flags | LOOKUP_JUMPED | LOOKUP_PARENT;
 	nd->depth = 0;
+	// 현재 호출상 LOOKUP_ROOT가 아니도록 하드코딩 되어있어서
+	// 임시적으로 넘어감
 	if (flags & LOOKUP_ROOT) {
 		struct dentry *root = nd->root.dentry;
 		struct inode *inode = root->d_inode;
@@ -2194,11 +2206,18 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	nd->path.mnt = NULL;
 	nd->path.dentry = NULL;
 
+	// mount_lock(시퀀스 락) 의 현재 시퀀스 값을 읽어 m_seq 필드에 저장한다.
+	// 시퀀스 락
+	// - read side: 임계영역의 전후 시퀀스값을 비교하여 수정이 발생하였나 확인
+	// - write side: seqlock_t 내부의 spinlock을 잡고 시퀀스값을 수정
+	//               동시에 다중 write 프로세스 접근 불가
 	nd->m_seq = read_seqbegin(&mount_lock);
+	// 파일경로의 시작이 '/'로 시작하는 경우
 	if (*s == '/') {
 		if (flags & LOOKUP_RCU)
 			rcu_read_lock();
 		set_root(nd);
+		// TODO: 여기부터 분석
 		if (likely(!nd_jump_root(nd)))
 			return s;
 		nd->root.mnt = NULL;
@@ -2406,7 +2425,6 @@ struct dentry *kern_path_locked(const char *name, struct path *path)
 
 int kern_path(const char *name, unsigned int flags, struct path *path)
 {
-	// TODO: 여기서부터 분석
 	return filename_lookup(AT_FDCWD, getname_kernel(name),
 			       flags, path, NULL);
 }

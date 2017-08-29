@@ -704,7 +704,11 @@ static int unlazy_walk(struct nameidata *nd)
 
 	BUG_ON(!(nd->flags & LOOKUP_RCU));
 
+	// rcu-walk 에서 ref-walk 모드로 전환
 	nd->flags &= ~LOOKUP_RCU;
+
+	// TODO: 여기서부터..
+	// symbolic link lookup에 대한 이해 필요
 	if (unlikely(!legitimize_links(nd)))
 		goto out2;
 	if (unlikely(!legitimize_path(nd, &nd->path, nd->seq)))
@@ -884,6 +888,7 @@ static inline void path_to_nameidata(const struct path *path,
 
 static int nd_jump_root(struct nameidata *nd)
 {
+	// nameidata에 root 디렉토리의 path, inode 정보를 넣어줌
 	if (nd->flags & LOOKUP_RCU) {
 		struct dentry *d;
 		nd->path = nd->root;
@@ -1692,8 +1697,10 @@ static inline int may_lookup(struct nameidata *nd)
 {
 	if (nd->flags & LOOKUP_RCU) {
 		int err = inode_permission(nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
+		// 현재 디렉토리명이 path의 마지막이 아닌 경우
 		if (err != -ECHILD)
 			return err;
+		// 현재 디렉토리명이 path의 마지막인 경우
 		if (unlazy_walk(nd))
 			return -ECHILD;
 	}
@@ -2062,7 +2069,7 @@ static inline u64 hash_name(const void *salt, const char *name)
  *
  * Returns 0 and nd will have valid dentry and mnt on success.
  * Returns error and drops reference to input namei data on failure.
- */
+*/ 
 static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	int err;
@@ -2217,13 +2224,16 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		if (flags & LOOKUP_RCU)
 			rcu_read_lock();
 		set_root(nd);
-		// TODO: 여기부터 분석
+
 		if (likely(!nd_jump_root(nd)))
+			// root 디렉토리의 path 리턴
 			return s;
 		nd->root.mnt = NULL;
 		rcu_read_unlock();
 		return ERR_PTR(-ECHILD);
-	} else if (nd->dfd == AT_FDCWD) {
+	}
+	// 파일 경로의 시작이 CWD(현재 작업 디렉토리)인 경우
+	else if (nd->dfd == AT_FDCWD) {
 		if (flags & LOOKUP_RCU) {
 			struct fs_struct *fs = current->fs;
 			unsigned seq;
@@ -2240,6 +2250,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 			get_fs_pwd(current->fs, &nd->path);
 			nd->inode = nd->path.dentry->d_inode;
 		}
+
 		return s;
 	} else {
 		/* Caller must check execute permissions on the starting path component */

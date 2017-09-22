@@ -254,6 +254,8 @@ getname_kernel(const char * filename)
 	result->uptr = NULL;
 	result->aname = NULL;
 	result->refcnt = 1;
+	// audit name은 linux audit system에서의 파일 감시를 위해 필요한 정보로,
+	// 보안 관련 정보를 추적하기 위해 사용된다.
 	audit_getname(result);
 
 	return result;
@@ -484,10 +486,12 @@ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
 int inode_permission(struct inode *inode, int mask)
 {
 	int retval;
-
+	
+	// 읽기전용 파일시스템에 쓰기 요청을 보내려는 경우 차단한다.
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)
 		return retval;
+	// TODO: 여기서부터...
 	return __inode_permission(inode, mask);
 }
 EXPORT_SYMBOL(inode_permission);
@@ -522,16 +526,16 @@ EXPORT_SYMBOL(path_put);
 
 #define EMBEDDED_LEVELS 2
 struct nameidata {
-	struct path	path;
-	struct qstr	last;
+	struct path	path;	// 탐색을 시작하는 디렉토리의 절대경로(e.g. pwd)
+	struct qstr	last;	// 마지막 파일명
 	struct path	root;
 	struct inode	*inode; /* path.dentry.d_inode */
 	unsigned int	flags;
 	unsigned	seq, m_seq;
-	int		last_type;
-	unsigned	depth;
+	int		last_type;	// 마지막 파일의 타입
+	unsigned	depth;		// 경로명 안의 symbol link의 수
 	int		total_link_count;
-	struct saved {
+	struct saved {	// symbol link를 처리하고 있을 때의 작업 영역
 		struct path link;
 		struct delayed_call done;
 		const char *name;
@@ -541,11 +545,12 @@ struct nameidata {
 	struct nameidata *saved;
 	struct inode	*link_inode;
 	unsigned	root_seq;
-	int		dfd;
+	int		dfd;	// lookup을 시작하는 덴트리의 파일디스크립터
 };
 
 static void set_nameidata(struct nameidata *p, int dfd, struct filename *name)
 {
+	// task_struct마다 nameidata 포인터를 하나씩 가진다.
 	struct nameidata *old = current->nameidata;
 	p->stack = p->internal;
 	p->dfd = dfd;
@@ -707,7 +712,6 @@ static int unlazy_walk(struct nameidata *nd)
 	// rcu-walk 에서 ref-walk 모드로 전환
 	nd->flags &= ~LOOKUP_RCU;
 
-	// TODO: 여기서부터..
 	// symbolic link lookup에 대한 이해 필요
 	if (unlikely(!legitimize_links(nd)))
 		goto out2;
@@ -2074,6 +2078,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	int err;
 
+	// 시작부분의 중복된 '/'를 제거
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -2242,6 +2247,7 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 			do {
 				seq = read_seqcount_begin(&fs->seq);
+				// PWD의 절대경로를 넣어줌
 				nd->path = fs->pwd;
 				nd->inode = nd->path.dentry->d_inode;
 				nd->seq = __read_seqcount_begin(&nd->path.dentry->d_seq);
@@ -2307,6 +2313,7 @@ static inline int lookup_last(struct nameidata *nd)
 /* Returns 0 and nd will be valid on success; Retuns error, otherwise. */
 static int path_lookupat(struct nameidata *nd, unsigned flags, struct path *path)
 {
+	// nameidata의 nd->path 정보(탐색 시작지점의 절대경로)를 채운다.
 	const char *s = path_init(nd, flags);
 	int err;
 
@@ -2335,10 +2342,16 @@ static int path_lookupat(struct nameidata *nd, unsigned flags, struct path *path
 	return err;
 }
 
+// 경로명 탐색은 본질적으로
+// 1. nameidata 구조체를 설정하고
+// 2. link_path_walk() 함수를 호출하는 것이다.
 static int filename_lookup(int dfd, struct filename *name, unsigned flags,
 			   struct path *path, struct path *root)
 {
 	int retval;
+	// nameidata 구조체는
+	// link_path_walk() 함수와 이를 호출하는 함수의 인터페이스인 것과 동시에
+	// link_path_walk() 함수 내의 작업 영역이기도 하다.
 	struct nameidata nd;
 	if (IS_ERR(name))
 		return PTR_ERR(name);
@@ -2346,6 +2359,8 @@ static int filename_lookup(int dfd, struct filename *name, unsigned flags,
 		nd.root = *root;
 		flags |= LOOKUP_ROOT;
 	}
+	// nameidata에 기본 정보를 채워넣고
+	// 현재 task_struct의 nameidata	정보를 업데이트한다.
 	set_nameidata(&nd, dfd, name);
 	retval = path_lookupat(&nd, flags | LOOKUP_RCU, path);
 	if (unlikely(retval == -ECHILD))

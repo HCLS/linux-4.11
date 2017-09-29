@@ -310,6 +310,13 @@ static int acl_permission_check(struct inode *inode, int mask)
 {
 	unsigned int mode = inode->i_mode;
 
+	// fsuid: 파일시스템 접근 권한 검사를 위해 사용되는 uid.
+	// 보통의 경우 euid를 따라간다. NFS의 경우 setfsuid()를
+	// 사용하여 euid와 다른 uid 권한으로 파일시스템에 접근 가능하다.
+	//
+	// 현재 fsuid와 아이노드 소유자의 uid가 같은지 검사
+	// 같으면 mode 비트 중 user 비트가 최하위 비트로 오도록 쉬프트한다.
+	// (octat으로 정의되어 있어서 3비트씩 쉬프트 함)
 	if (likely(uid_eq(current_fsuid(), inode->i_uid)))
 		mode >>= 6;
 	else {
@@ -319,6 +326,7 @@ static int acl_permission_check(struct inode *inode, int mask)
 				return error;
 		}
 
+		// 그룹이 같으면 그룹 비트가 최하위 비트로 오도록 쉬프트.
 		if (in_group_p(inode->i_gid))
 			mode >>= 3;
 	}
@@ -326,6 +334,9 @@ static int acl_permission_check(struct inode *inode, int mask)
 	/*
 	 * If the DACs are ok we don't need any capability check.
 	 */
+	// 만약에 유저, 그룹 둘 다 id가 같지 않았다면, other를 대상으로 검사
+	// 오퍼레이션이 얻으려는 권한이 inode의 퍼미션에 없으면 0이 아닌 값이
+	// 나오므로 -EACCES 를 리턴한다.
 	if ((mask & ~mode & (MAY_READ | MAY_WRITE | MAY_EXEC)) == 0)
 		return 0;
 	return -EACCES;
@@ -352,10 +363,12 @@ int generic_permission(struct inode *inode, int mask)
 	/*
 	 * Do the basic permission checks.
 	 */
+	// 아이노드의 퍼미션과 비교하여 수행권한이 있는지 확인한다.
 	ret = acl_permission_check(inode, mask);
 	if (ret != -EACCES)
 		return ret;
 
+	// TODO: 여기서부터...
 	if (S_ISDIR(inode->i_mode)) {
 		/* DACs are overridable for directories */
 		if (capable_wrt_inode_uidgid(inode, CAP_DAC_OVERRIDE))
@@ -397,13 +410,18 @@ static inline int do_inode_permission(struct inode *inode, int mask)
 {
 	if (unlikely(!(inode->i_opflags & IOP_FASTPERM))) {
 		if (likely(inode->i_op->permission))
+			// 로컬 파일시스템이 permission 함수를 따로 정의한 경우
 			return inode->i_op->permission(inode, mask);
 
 		/* This gets set once for the inode lifetime */
+		// IOP_FASTPERM 플래그가 설정되어 있지 않으면서, 로컬 파일시스템이
+		// permission 함수도 정의하지 않은 경우에 다음부터는 항상
+		// IOP_FASTPERM 방식으로 동작하게 한다.
 		spin_lock(&inode->i_lock);
 		inode->i_opflags |= IOP_FASTPERM;
 		spin_unlock(&inode->i_lock);
 	}
+	// VFS의 일반 permission 검사함수 호출(IOP_FASTPERM)
 	return generic_permission(inode, mask);
 }
 
@@ -423,6 +441,7 @@ int __inode_permission(struct inode *inode, int mask)
 {
 	int retval;
 
+	// mask: inode_permission을 호출한 함수가 필요할지도 모르는 권한
 	if (unlikely(mask & MAY_WRITE)) {
 		/*
 		 * Nobody gets write access to an immutable file.
@@ -491,7 +510,6 @@ int inode_permission(struct inode *inode, int mask)
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)
 		return retval;
-	// TODO: 여기서부터...
 	return __inode_permission(inode, mask);
 }
 EXPORT_SYMBOL(inode_permission);

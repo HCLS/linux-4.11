@@ -368,9 +368,13 @@ int generic_permission(struct inode *inode, int mask)
 	if (ret != -EACCES)
 		return ret;
 
-	// TODO: 여기서부터...
 	if (S_ISDIR(inode->i_mode)) {
 		/* DACs are overridable for directories */
+		// Discretionary Access Control(DAC)
+		// 임의적 접근 통제 : 계정 또는 계정그룹에 근거하여
+		// 		      객체에 대한 접근을 제어하는 것. 
+		// capability list : 접근 가능 목록
+		// TODO: 여기서부터...
 		if (capable_wrt_inode_uidgid(inode, CAP_DAC_OVERRIDE))
 			return 0;
 		if (!(mask & MAY_WRITE))

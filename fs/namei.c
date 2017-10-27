@@ -374,7 +374,7 @@ int generic_permission(struct inode *inode, int mask)
 		// 임의적 접근 통제 : 계정 또는 계정그룹에 근거하여
 		// 		      객체에 대한 접근을 제어하는 것. 
 		// capability list : 접근 가능 목록
-		// TODO: 여기서부터...
+		// 현재 태스크가 해당 아이노드에 대한 쓰기권한이 있는지 검사
 		if (capable_wrt_inode_uidgid(inode, CAP_DAC_OVERRIDE))
 			return 0;
 		if (!(mask & MAY_WRITE))
@@ -466,6 +466,7 @@ int __inode_permission(struct inode *inode, int mask)
 	if (retval)
 		return retval;
 
+	// ?!? cgroup을 공부하고 재도전..
 	retval = devcgroup_inode_permission(inode, mask);
 	if (retval)
 		return retval;
@@ -735,6 +736,7 @@ static int unlazy_walk(struct nameidata *nd)
 	nd->flags &= ~LOOKUP_RCU;
 
 	// symbolic link lookup에 대한 이해 필요
+	// TODO: 여기서부터...
 	if (unlikely(!legitimize_links(nd)))
 		goto out2;
 	if (unlikely(!legitimize_path(nd, &nd->path, nd->seq)))
@@ -1722,11 +1724,11 @@ out:
 static inline int may_lookup(struct nameidata *nd)
 {
 	if (nd->flags & LOOKUP_RCU) {
+		// inode_permission() 함수는 rcu-walk가 불가능한 경우에 -ECHILD를 리턴함
 		int err = inode_permission(nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
-		// 현재 디렉토리명이 path의 마지막이 아닌 경우
 		if (err != -ECHILD)
 			return err;
-		// 현재 디렉토리명이 path의 마지막인 경우
+		// -ECHILD인 경우 ref-walk 방식으로 다시 퍼미션을 검사
 		if (unlazy_walk(nd))
 			return -ECHILD;
 	}

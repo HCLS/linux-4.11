@@ -371,6 +371,7 @@ static bool ns_capable_common(struct user_namespace *ns, int cap, bool audit)
 		BUG();
 	}
 
+	// current_cred() : 현재 태스크의 cred 구조체를 리턴
 	capable = audit ? security_capable(current_cred(), ns, cap) :
 			  security_capable_noaudit(current_cred(), ns, cap);
 	if (capable == 0) {
@@ -479,10 +480,20 @@ bool privileged_wrt_inode_uidgid(struct user_namespace *ns, const struct inode *
  * its own user namespace and that the given inode's uid and gid are
  * mapped into the current user namespace.
  */
+// 현재 태스크의 user namespace를 기준으로 검사한다.
+// 1. 주어진 capability(cap)를 갖고 있는 지 검사
+// 2. 인자로 넘어온 아이노드의 uid, gid가 맵핑이 되어있는 지 검사
+// 두 조건 모두 충족 시 true 리턴
 bool capable_wrt_inode_uidgid(const struct inode *inode, int cap)
 {
+	// 리눅스는 컨테이너 별로 독립적인 공간을 제공하고
+	// 서로가 충돌하지 않도록 하기 위해 namespace 기능을 커널에
+	// 내장하고 있다. user namespace를 이용하여 컨테이너 별로 독립적인 
+	// uid, gid 번호를 가질 수 있다. 그러므로 current_user_ns()를 이용하여
+	// 현재 프로세스의 user namespace를 가져와서 비교해야 한다.
 	struct user_namespace *ns = current_user_ns();
 
+	// ?!? capability 분석 후 재도전
 	return ns_capable(ns, cap) && privileged_wrt_inode_uidgid(ns, inode);
 }
 EXPORT_SYMBOL(capable_wrt_inode_uidgid);

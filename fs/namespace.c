@@ -595,11 +595,13 @@ static void delayed_free_vfsmnt(struct rcu_head *head)
 int __legitimize_mnt(struct vfsmount *bastard, unsigned seq)
 {
 	struct mount *mnt;
+	// mount_lock의 seq 값이 변경되어 있으면 1 리턴
 	if (read_seqretry(&mount_lock, seq))
 		return 1;
 	if (bastard == NULL)
 		return 0;
 	mnt = real_mount(bastard);
+	// mount 구조체의 레퍼런스 카운트 1 증가시킴.
 	mnt_add_count(mnt, 1);
 	if (likely(!read_seqretry(&mount_lock, seq)))
 		return 0;

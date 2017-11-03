@@ -676,6 +676,8 @@ static void terminate_walk(struct nameidata *nd)
 static bool legitimize_path(struct nameidata *nd,
 			    struct path *path, unsigned seq)
 {
+	// mount 구조체의 refcount를 증가시켜줌으로써
+        // lookup 도중 umount를 방지한다.
 	int res = __legitimize_mnt(path->mnt, nd->m_seq);
 	if (unlikely(res)) {
 		if (res > 0)
@@ -683,6 +685,8 @@ static bool legitimize_path(struct nameidata *nd,
 		path->dentry = NULL;
 		return false;
 	}
+	// 탐색해야 하는 덴트리의 refcount를 증가시켜줌으로써
+	// lookup 도중 dcache에서 해제되는 것을 방지한다.
 	if (unlikely(!lockref_get_not_dead(&path->dentry->d_lockref))) {
 		path->dentry = NULL;
 		return false;
@@ -695,7 +699,12 @@ static bool legitimize_links(struct nameidata *nd)
 	int i;
 	for (i = 0; i < nd->depth; i++) {
 		struct saved *last = nd->stack + i;
+		// drop_links()가 호출되는 경우
+		// 1. mount 구조체의 seqcount 값이 변경됨
+		// 2. dentry의 refcount를 증가시키는 데 실패함
+		// 3. dentry의 seqcount 값이 변경됨(rename)
 		if (unlikely(!legitimize_path(nd, &last->link, last->seq))) {
+			// 모든 심볼릭 링크를 해제한다.
 			drop_links(nd);
 			nd->depth = i + 1;
 			return false;
@@ -735,10 +744,11 @@ static int unlazy_walk(struct nameidata *nd)
 	// rcu-walk 에서 ref-walk 모드로 전환
 	nd->flags &= ~LOOKUP_RCU;
 
-	// symbolic link lookup에 대한 이해 필요
-	// TODO: 여기서부터...
+	// 덴트리의 심볼릭 링크들이 유효한지 검사한다.
+        // 유효하지 못하면 lookup을 처음부터 다시 시작.
 	if (unlikely(!legitimize_links(nd)))
 		goto out2;
+	// TODO: 여기서부터...
 	if (unlikely(!legitimize_path(nd, &nd->path, nd->seq)))
 		goto out1;
 	if (nd->root.mnt && !(nd->flags & LOOKUP_ROOT)) {
@@ -1725,10 +1735,14 @@ static inline int may_lookup(struct nameidata *nd)
 {
 	if (nd->flags & LOOKUP_RCU) {
 		// inode_permission() 함수는 rcu-walk가 불가능한 경우에 -ECHILD를 리턴함
+		// rcu-walk가 불가능한 경우 : lookup 해야 할 child dentry가
+		// dcache에 없는 경우.
 		int err = inode_permission(nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
 		if (err != -ECHILD)
 			return err;
-		// -ECHILD인 경우 ref-walk 방식으로 다시 퍼미션을 검사
+		// ref-walk 방식으로 다시 퍼미션을 검사한다.
+		// 만약 rename이 발생하면 덴트리의 seqcount 값이 변한다.
+	        // seqcount 값이 변한 경우 -ECHILD를 리턴한다.
 		if (unlazy_walk(nd))
 			return -ECHILD;
 	}
@@ -2387,6 +2401,8 @@ static int filename_lookup(int dfd, struct filename *name, unsigned flags,
 	// 현재 task_struct의 nameidata	정보를 업데이트한다.
 	set_nameidata(&nd, dfd, name);
 	retval = path_lookupat(&nd, flags | LOOKUP_RCU, path);
+	// path lookup 중에 rename이 발생한 경우
+	// path의 처음부터 ref-walk 방식으로 다시 진행한다.
 	if (unlikely(retval == -ECHILD))
 		retval = path_lookupat(&nd, flags, path);
 	if (unlikely(retval == -ESTALE))
